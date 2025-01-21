@@ -40,32 +40,30 @@ class Residual(nn.Module):  #@save
         Y = Y + X
         return F.relu(Y)
 
-
-
 #We set input channels be 3 and the number channels be 32
-# class DeepSort(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         #first two layers of Conv and 1 layer of max pooling
-#         self.b1 = nn.Sequential(nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
-#                            nn.BatchNorm2d(32), nn.Sigmoid(),nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
-#                            nn.BatchNorm2d(32), nn.Sigmoid(),
-#                            nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
-#
-#         self.b2 = nn.Sequential(Residual(32, 32))
-#         self.b3 = nn.Sequential(Residual(32, 32))
-#         self.b4 = nn.Sequential(Residual(32, 64, use_1x1conv=True, strides=2))
-#         self.b5 = nn.Sequential(Residual(64, 64))
-#         self.b6 = nn.Sequential(Residual(64, 128, use_1x1conv=True, strides=2))
-#         self.b7 = nn.Sequential(Residual(128, 128))
-#         self.b8 = nn.Sequential(nn.AdaptiveAvgPool2d((1,1)) , nn.Flatten() , nn.Linear(128, 128))
-#         # self.b8 = nn.Sequential(nn.AdaptiveAvgPool2d((1,1)) , nn.Flatten() , nn.Linear(128, 128), nn.BatchNorm1d(128))
-#
-#         self.Net = nn.Sequential(self.b1,self.b2,self.b3,self.b4,self.b5,self.b6,self.b7,self.b8)
-#
-#     def forward(self, X):
-#
-#         return F.normalize(self.Net(X), p=2, dim=1)
+class DeepSort(nn.Module):
+    def __init__(self):
+        super().__init__()
+        #first two layers of Conv and 1 layer of max pooling
+        self.b1 = nn.Sequential(nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+                           nn.BatchNorm2d(32), nn.Sigmoid(),nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+                           nn.BatchNorm2d(32), nn.Sigmoid(),
+                           nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+
+        self.b2 = nn.Sequential(Residual(32, 32))
+        self.b3 = nn.Sequential(Residual(32, 32))
+        self.b4 = nn.Sequential(Residual(32, 64, use_1x1conv=True, strides=2))
+        self.b5 = nn.Sequential(Residual(64, 64))
+        self.b6 = nn.Sequential(Residual(64, 128, use_1x1conv=True, strides=2))
+        self.b7 = nn.Sequential(Residual(128, 128))
+        self.b8 = nn.Sequential(nn.AdaptiveAvgPool2d((1,1)) , nn.Flatten() , nn.Linear(128, 128))
+        # self.b8 = nn.Sequential(nn.AdaptiveAvgPool2d((1,1)) , nn.Flatten() , nn.Linear(128, 128), nn.BatchNorm1d(128))
+
+        self.Net = nn.Sequential(self.b1,self.b2,self.b3,self.b4,self.b5,self.b6,self.b7,self.b8)
+
+    def forward(self, X):
+
+        return F.normalize(self.Net(X), p=2, dim=1)
 
 class Inception(nn.Module):
     # c1--c4是每条路径的输出通道数
@@ -85,14 +83,10 @@ class Inception(nn.Module):
 
     def forward(self, x):
         p1 = F.relu(self.p1_1(x))
-
         p2 = F.relu(self.p2_2(F.relu(self.p2_1(x))))
-
         p3 = F.relu(self.p3_2(F.relu(self.p3_1(x))))
-
         p4 = F.relu(self.p4_2(self.p4_1(x)))
         # 在通道维度上连结输出
-
         return torch.cat((p1, p2, p3, p4), dim=1)
 
 class GoogleNet(nn.Module):
@@ -139,51 +133,6 @@ class GoogleNet(nn.Module):
 #         EuclideanDis = nn.PairwiseDistance(p=2)
 #         loss = EuclideanDis(plot1, plot2)
 #         return loss
-def resnetblock(input_channels, num_channels, num_resduals, fisrt_block = False):
-    blk = []
-    for i in range(num_resduals):
-        if(i == 0 and not fisrt_block):
-            blk.append(Residual(input_channels , num_channels ,use_1x1conv=True ,strides=2))
-        else:
-            blk.append(Residual(input_channels, num_channels))
-    return blk
-
-class ResNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.b1 = nn.Sequential(nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3),nn.BatchNorm2d(64),nn.ReLU(),nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
-        self.b2 = nn.Sequential(*resnetblock(64,64,2,True))
-        self.b3 = nn.Sequential(*resnetblock(64,128,2,False))
-        self.b4 = nn.Sequential(*resnetblock(128,256,2,False))
-        self.b5 = nn.Sequential(*resnetblock(256,512,2,False))
-        self.net = nn.Sequential(self.b1,self.b2,self.b3,self.b4,self.b5,nn.AdaptiveAvgPool2d((1, 1)),nn.Flatten(),nn.Linear(512,128))
-
-    def forward(self, X):
-        x = self.b1(X)
-        print(f"Output of b1: {x.shape}")
-
-        x = self.b2(x)
-        print(f"Output of b2: {x.shape}")
-
-        x = self.b3(x)
-        print(f"Output of b3: {x.shape}")
-
-        x = self.b4(x)
-        print(f"Output of b4: {x.shape}")
-
-        x = self.b5(x)
-        print(f"Output of b5: {x.shape}")
-
-        x = nn.AdaptiveAvgPool2d((1, 1))(x)
-        print(f"Output after AdaptiveAvgPool2d: {x.shape}")
-
-        x = nn.Flatten()(x)
-        print(f"Output after Flatten: {x.shape}")
-
-        x = nn.Linear(512, 128)(x)
-        print(f"Output after Linear: {x.shape}")
-
-        return F.normalize(x, p=2, dim=1)
 
 
 
@@ -209,7 +158,7 @@ def PossibleCombination(m,n):
 
 if __name__ == '__main__':
     #load train and test data
-    train_img_data = torchvision.datasets.ImageFolder('/Users/jason/IdeaProjects/PeopleFlowDetection/Marker-1501testlarge/train' ,transform=transform)
+    train_img_data = torchvision.datasets.ImageFolder('/Users/jason/IdeaProjects/PeopleFlowDetection/Marker-1501testlarge/train',transform=transform)
     # train_data1 = torch.utils.data.DataLoader(train_img_data, batch_size=2,shuffle=True,num_workers=1,drop_last=True)
     test_img_data = torchvision.datasets.ImageFolder('/Users/jason/IdeaProjects/PeopleFlowDetection/Marker-1501testlarge/test',transform=transform)
     test_data = torch.utils.data.DataLoader(test_img_data, batch_size=2,shuffle=False, num_workers=1,drop_last=True)
@@ -229,7 +178,7 @@ if __name__ == '__main__':
 
 
     #new a net
-    # net = ResNet()
+    # net = DeepSort()
     net = GoogleNet()
     net = net.to(DEVICE)
     initial_lr = 0.001
@@ -290,9 +239,6 @@ if __name__ == '__main__':
                 #decide whether the two batch images belongs to same person
                 # cur_batch_class = 1 if batch_x[1][0] == batch_x[1][1] else 0
                 # print(batch_x[1][0],batch_x[1][1],cur_different_x[1])
-                # Testx = torch.rand(3,3,128,64).to(DEVICE)
-                # testout = net(Testx)
-
 
                 cur_batch_x = Variable(cur_batch_x).to(DEVICE)
                 # print(out[0].shape)
@@ -305,9 +251,7 @@ if __name__ == '__main__':
 
                 # person_diff_dist[times%100] = LossFunction(out[0], out[2])
                 # person_same_dist[times%100] = LossFunction(out[0], out[1])
-                # print("out0 and out1 loss", LossFunction(out[0], out[1]))
-                # print("out0 and out2 loss",LossFunction(out[0], out[2]))
-                loss = LossFunction(out[0], out[1]) + max(0,2.1-LossFunction(out[0], out[2]))*1.5
+                loss = LossFunction(out[0], out[1]) / LossFunction(out[0], out[2])
                 if(times % 10 == 0):
                     print(loss)
 
@@ -402,11 +346,10 @@ if __name__ == '__main__':
         #     #     print(loss)
         #     times = times + 1
         #     torch.mps.empty_cache()
-
-        class_weight_sum = torch.zeros(len(train_img_data.classes),128,device=DEVICE)
-        class_count_sum = [0 for _ in range(len(train_img_data.classes))]
         #calculate current weight of each class after training epoch
         #get the middle point of the classes We can modify this to achieve higher accuracy
+        class_weight_sum = torch.zeros(len(train_img_data.classes),128,device=DEVICE)
+        class_count_sum = [0 for _ in range(len(train_img_data.classes))]
         for i in range(0,person_image_num[-1]+1,2):
             cur_batch_x = torch.empty((2,3,128,64),device=DEVICE,dtype=torch.float32)
             cur_batch_x[0] = train_img_data[i][0]
@@ -456,8 +399,7 @@ if __name__ == '__main__':
             if(pred1 == batch_x[1][1]):
                 correct_num = correct_num + 1
             times = times + 1
-        print('correct number:',correct_num)
-        print('Acc: {:.6f}%'.format(correct_num / (len(test_img_data)) * 100))
+        print('Acc: {:.6f}'.format(correct_num / (len(train_img_data.classes))))
 
     # imagepath1 = "/Users/jason/IdeaProjects/PeopleFlowDetection/Market-1501/train/0002/0002_c1s1_000551_01.jpg"
     # imagepath2 = "/Users/jason/IdeaProjects/PeopleFlowDetection/Market-1501/train/0002/0002_c1s1_000776_01.jpg"
@@ -475,7 +417,6 @@ if __name__ == '__main__':
     # res1 = model(tensor1)
     # res2 = model(tensor2)
     # Loss = LossFunction(res1, res2)
-
 
 
 
