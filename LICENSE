@@ -22,3 +22,117 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 定义目标函数及其梯度
+def f(x, gamma):
+    return 0.5 * (x[0]**2 + gamma * x[1]**2)
+
+def grad_f(x, gamma):
+    return np.array([x[0], gamma * x[1]])
+
+# 梯度下降算法
+def gradient_descent(x_init, gamma, alpha, tol=1e-6, max_iter=1000):
+    x = np.array(x_init)
+    history = [x.copy()]
+    for _ in range(max_iter):
+        grad = grad_f(x, gamma)
+        x = x - alpha * grad
+        history.append(x.copy())
+        if np.linalg.norm(grad) < tol:
+            break
+    return np.array(history)
+
+# 设置参数
+x_init = [10, 10]  # 初始点
+alpha = 0.1        # 学习率
+gammas = [1, 3, 0.3, 10, 0.01]  # 不同的 gamma 值
+
+# 针对不同的 gamma 值运行梯度下降
+results = {}
+for gamma in gammas:
+    trajectory = gradient_descent(x_init, gamma, alpha)
+    results[gamma] = trajectory
+
+# 绘制每种 gamma 值的收敛曲线
+plt.figure(figsize=(12, 6))
+for gamma, trajectory in results.items():
+    plt.plot(range(len(trajectory)), np.linalg.norm(trajectory, axis=1), label=f'gamma = {gamma}')
+plt.yscale("log")
+plt.xlabel("Iteration")
+plt.ylabel("Norm of x (Distance to Optimal Solution)")
+plt.title("Convergence of Gradient Descent with Different gamma values")
+plt.legend()
+plt.grid()
+plt.show()
+
+
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+int Global_var = 0;
+int main(void) {
+    pid_t pid, pid1;
+    pid = fork();
+    if (pid < 0)
+    {
+        fprintf(stderr, "Fork failed!");
+    }
+    else if (pid == 0)
+    {
+        pid1 = getpid();
+        //printf("Child process PID = %d",pid1);
+        //system("./system_call");
+        //execl("./system_call", "system_call", NULL);
+        //Global_var += 1;
+        //printf("Child: value = %d",Global_var);
+        //printf("Child: Value Location = %d",&Global_var);
+        printf("Child:pid = %d", pid);
+        printf("Child:pid1 = %d", pid1);
+    } else
+    {
+        pid1 = getpid();
+        //printf("Parent process PID =  %d", pid1);
+        //printf("Child process1 PID =  %d", pid);
+        //Global_var -= 1;
+        //printf("Parent: value = %d",Global_var);
+        //printf("Parent: Value Location = %d",&Global_var);
+        printf("Parent:pid = %d", pid);
+        printf("Parent:pid1 = %d", pid1);
+        wait(NULL);
+    }
+    //Global_var += 10;
+    //printf("return value = %d",Global_var);
+    // printf("return Value Location = %d",&Global_var);
+    return 0;
+
+}
+
+
+
+
+
+平-仄+
++-+-
+
+
+1国庆日
+6
+
+
+
+
+--- --- --- 
+110 110 110
+
+
+
