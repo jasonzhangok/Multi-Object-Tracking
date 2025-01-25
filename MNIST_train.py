@@ -59,9 +59,21 @@ def LossFunction(plot1, plot2):
     return loss
 
 if __name__ == '__main__':
+    #Parameters:
+    train_data_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/MNIST/data/mnist_train'
+    test_data_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/MNIST/data/mnist_test'
+    initial_lr = 0.001
+    net_save_flag = 1
+    net_load_flag = 1
+    max_epoch = 10
+    loss_distance = 5
+    threshold = 2
+
+
+
     #load train and test data
-    train_img_data = torchvision.datasets.ImageFolder('/Users/jason/IdeaProjects/PeopleFlowDetection/MNIST/data/mnist_train' ,transform=transform)
-    test_img_data = torchvision.datasets.ImageFolder('/Users/jason/IdeaProjects/PeopleFlowDetection/MNIST/data/mnist_test',transform=transform)
+    train_img_data = torchvision.datasets.ImageFolder(train_data_path ,transform=transform)
+    test_img_data = torchvision.datasets.ImageFolder(test_data_path,transform=transform)
     test_data = torch.utils.data.DataLoader(test_img_data, batch_size=1,shuffle=True, num_workers=1,drop_last=True)
     #calculate the begin index of each class
     number_image_num = [0 for i in range(len(train_img_data.classes))]
@@ -83,15 +95,11 @@ if __name__ == '__main__':
     #new a net
     net = MyNet()
     net = net.to(DEVICE)
-    initial_lr = 0.001
     optimizer = torch.optim.Adam(net.parameters(),lr=initial_lr)
     print("Training on {}".format(DEVICE))
-    net_save_flag = 1
-    net_load_flag = 1
     #try to print the whold tensor for console
     torch.set_printoptions(profile='full')
 
-    max_epoch = 10
     for epoch in range(max_epoch):
         if (net_load_flag == 1):
             pthfile = 'weights/weight' + str(epoch) + '.pth'
@@ -150,13 +158,12 @@ if __name__ == '__main__':
                     out0 = net(torch.reshape(cur_batch_x[0],(1,28,28)))
                     out1 = net(torch.reshape(cur_batch_x[1],(1,28,28)))
                     out2 = net(torch.reshape(cur_batch_x[2],(1,28,28)))
-                    loss = LossFunction(out0, out1) + max(0,2-LossFunction(out0, out2))
+                    loss = LossFunction(out0, out1) + max(0,loss_distance-LossFunction(out0, out2))
 
                     if(times % 10 == 0):
                         print('loss:', loss)
                         print('loss1:', LossFunction(out0, out1))
                         print('loss2:', LossFunction(out0, out2))
-
 
                     optimizer.zero_grad()
                     loss.backward()
@@ -170,7 +177,6 @@ if __name__ == '__main__':
         print("Testing:")
         #test
         correct_class_num = 0
-        threshold = 2
         # TODO:Attention: There is not need for us to classify whether the test image belongs to the right class as input We just need to decide how many class we have and when input a new image, we classify it to the correct class
         class_count = 0
         #  class_weight_berycenter: store image tags(class) and the output of the net with the image input to calculate the barycenter
