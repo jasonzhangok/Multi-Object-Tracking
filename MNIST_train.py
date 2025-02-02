@@ -54,19 +54,14 @@ transform = transforms.Compose([
 ])
 
 
-class NumberWeight():
-    def __init__(self):
-        self.identity = -1
-        self.weight = []
-        self.count = 0
-
 
 def LossFunction(plot1, plot2):
     # EuclideanDis = nn.PairwiseDistance(p=2)
     # loss = EuclideanDis(plot1, plot2)
-    loss = F.pairwise_distance(plot1, plot2)
-    loss = torch.pow(loss, 2)
-    return loss
+    # loss = F.pairwise_distance(plot1, plot2)
+    # loss = torch.pow(loss, 2)
+    loss = torch.cosine_similarity(plot1, plot2,0)
+    return 1 - loss
 
 
 def contrastive_loss(plot1, plot2, target, margin):
@@ -81,8 +76,10 @@ def triplet_loss(plot1, plot2, plot3, margin):
     # anchor = plot1
     # positive = plot2
     # negative = plot3
-    dis_ap = torch.pow(F.pairwise_distance(plot1, plot2), 2)
-    dis_an = torch.pow(F.pairwise_distance(plot1, plot3), 2)
+    dis_ap = LossFunction(plot1,plot2)
+    dis_an = LossFunction(plot1,plot3)
+    # dis_ap = torch.pow(F.pairwise_distance(plot1, plot2), 2)
+    # dis_an = torch.pow(F.pairwise_distance(plot1, plot3), 2)
     loss = F.relu(dis_ap - dis_an + margin)
     return loss
 
@@ -98,7 +95,7 @@ if __name__ == '__main__':
     # train epoch
     max_epoch = 10
     # loss function constant
-    Margin = 5
+    Margin = 0.5
 
     # load train and test data
     train_img_data = torchvision.datasets.ImageFolder(train_data_path, transform=transform)
@@ -131,7 +128,7 @@ if __name__ == '__main__':
         print('epoch {}'.format(epoch + 1))
         net.train()
         times = 0
-        for j in range(len(train_img_data.classes) - 1):
+        for j in range(len(train_img_data.classes)):
             print("Calculating {}-th group of data".format(j))
             # flag = [0] * class_image_num[j]
             # possible combination of two people's images
@@ -148,7 +145,7 @@ if __name__ == '__main__':
                 if (j == 0):
                     while (randindex3 <= number_image_num[j]):
                         randindex3 = random.randint(0, len(train_img_data) - 1)
-                elif (randindex3 == len(train_img_data.classes) - 1):
+                elif (j == len(train_img_data.classes) - 1):
                     while (randindex3 >= number_image_num[j - 1]):
                         randindex3 = random.randint(0, len(train_img_data) - 1)
                 else:
@@ -195,7 +192,7 @@ if __name__ == '__main__':
                 torch.mps.empty_cache()
                 times = times + 1
             if (net_save_flag == 1):
-                weights_save_name = 'weights/weight' + str(epoch) + '.pth'
+                weights_save_name = 'weights/weightCOS' + str(epoch) + '.pth'
                 torch.save(net.state_dict(), weights_save_name)
 
 
