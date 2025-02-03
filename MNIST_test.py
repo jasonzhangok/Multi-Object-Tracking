@@ -1,20 +1,8 @@
-import copy
-
-import sklearn.manifold
 import torch
-import numpy as np
-from torch import nn
-from torch.nn import functional as F
 import torchvision
-from torch.autograd import Variable
 from torchvision import transforms
 import random
-from tqdm import tqdm
 import train
-import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
-import seaborn as sns
-import copy
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -385,7 +373,7 @@ if __name__ == '__main__':
 
         if(print_times % 1000 == 0):
             print(class_count)
-    print("accuracy = %.2f%%"%(correct_class_num/10000 * 100))
+    print("accuracy = %.2f%%"%(correct_class_num / 10000 * 100))
     for i in range(len(class_weight_berycenter)):
         print('Number:',class_weight_berycenter[i].identity,'   times:',class_weight_berycenter[i].count)
 

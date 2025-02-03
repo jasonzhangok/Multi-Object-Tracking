@@ -1,19 +1,9 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.nn import init
-import cv2
-import numpy as np
 import torchvision
-from torch.optim.lr_scheduler import LambdaLR
 from torch.autograd import Variable
 from torchvision import transforms
-from torchvision import datasets
-from torchvision import models
-import random
-from torch.utils.data import ConcatDataset
-from torch.utils.data.sampler import Sampler
-from torch import randperm
 import random
 from tqdm import tqdm
 
@@ -191,8 +181,11 @@ if __name__ == '__main__':
                 optimizer.step()
                 torch.mps.empty_cache()
                 times = times + 1
-            if (net_save_flag == 1):
-                weights_save_name = 'weights/weightCOS' + str(epoch) + '.pth'
-                torch.save(net.state_dict(), weights_save_name)
+                if(net_save_flag == 1 and times % 1000 == 0):
+                    weights_save_name = 'weights/weightCOS' + str(epoch) + '.pth'
+                    torch.save(net.state_dict(), weights_save_name)
+        #Save net parameters at the end of each epoch train
+        weights_save_name = 'weights/weightCOS' + str(epoch) + '.pth'
+        torch.save(net.state_dict(), weights_save_name)
 
 
