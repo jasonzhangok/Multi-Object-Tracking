@@ -20,12 +20,16 @@ import copy
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'mps')
 ResNet50 = train.ResNet50
 LossFunction = train.LossFunction
-contrastive_loss = train.contrastive_loss
-triple_loss = train.triplet_loss
 
 
 
-transform = train.transforms.Compose([transforms.ToTensor()])
+transform = transforms.Compose([
+    transforms.Resize((128, 64)),  # Resize images to 128x64 (Market-1501 format)
+    # transforms.RandomHorizontalFlip(),  # Apply random flipping to augment data
+    transforms.ToTensor(),  # Convert image to PyTorch tensor
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize between -1 and 1
+])
+
 
 class NumberWeight():
     def __init__(self):
@@ -34,7 +38,10 @@ class NumberWeight():
         self.count = 0
         self.weight = torch.empty([16])
 
-
+class PersonImage():
+    def __init__(self):
+        self.count = 0
+        self.featuremap = []
 
 
 def MeanAndDeviation(points,number):
@@ -94,7 +101,7 @@ if __name__ == '__main__':
     test_data_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/MNIST/data/mnist_test'
     # test_smalldata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/test_small'
     test_smalldata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/query_small'
-    test_mediumdata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/test_medium'
+    test_mediumdata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/query_medium'
     #learning rate
     initial_lr = 0.001
     #whether save model parameters and whether load moder
@@ -104,13 +111,13 @@ if __name__ == '__main__':
     #whether test or not
     test_index = 1
     #weight path
-    weight_index = 10
+    weight_index = 19
     pthfile = 'weights/weightCOS' + str(weight_index) + '.pth'
     #train image data class
-    total_image_class = 10
+    total_image_class = 8
 
     #load train and test data
-    test_img_data = torchvision.datasets.ImageFolder(test_smalldata_path,transform=transform)
+    test_img_data = torchvision.datasets.ImageFolder(test_mediumdata_path,transform=transform)
     #test_data = torch.utils.data.DataLoader(test_img_data, batch_size=1,shuffle=True, num_workers=4,drop_last=True)
     #calculate the begin index of each class
 
@@ -178,6 +185,7 @@ if __name__ == '__main__':
             temp_dist_list.append(dist)
         point_distance.append(temp_dist_list)
     point_distance = tuple(point_distance)
+
     #
     #
     # #2. The distance between this point and all class barycenters(10)
@@ -206,9 +214,9 @@ if __name__ == '__main__':
     #             dist = torch.tensor(0.0)
     #         temp_dist_list.append(dist)
     #     barycenter_distance.append(temp_dist_list)
-    # # 4. The distance between this point and all its same class points and the distance between this points and all its different class points
+    # 4. The distance between this point and all its same class points and the distance between this points and all its different class points
     # in_class_distance = []
-    # each_class_number = int(len(test_img_data)/10)
+    # each_class_number = int(len(test_img_data)/total_image_class)
     # for i in range(total_image_class):
     #     temp_dist_list = []
     #     for j in range(each_class_number):
@@ -223,42 +231,42 @@ if __name__ == '__main__':
     #     for j in range(each_class_number):
     #         del between_class_distance[i*each_class_number+j][i*each_class_number:(i+1)*each_class_number]
     #
-    # # 5. The mean distance and standard deviation in class
-    # class_mean = []
-    # class_deviation = []
-    # for i in range(total_image_class):
-    #     temp_mean,temp_deviation = MeanAndDeviation(in_class_distance[i],each_class_number)
-    #     class_mean.append(temp_mean)
-    #     class_deviation.append(temp_deviation)
-    # # 6. The distance sequence in class(downwards) and the distance sequence between class(upwards)
-    # in_class_distance_seq = []
-    # for i in range(total_image_class):
-    #     in_class_distance_seq.append(InClassDistanceDownwards(in_class_distance[i],each_class_number))
-    # between_class_distance_seq = []
+    # # # 5. The mean distance and standard deviation in class
+    # # class_mean = []
+    # # class_deviation = []
+    # # for i in range(total_image_class):
+    # #     temp_mean,temp_deviation = MeanAndDeviation(in_class_distance[i],each_class_number)
+    # #     class_mean.append(temp_mean)
+    # #     class_deviation.append(temp_deviation)
+    # # # 6. The distance sequence in class(downwards) and the distance sequence between class(upwards)
+    # # in_class_distance_seq = []
+    # # for i in range(total_image_class):
+    # #     in_class_distance_seq.append(InClassDistanceDownwards(in_class_distance[i],each_class_number))
+    # # between_class_distance_seq = []
+    # #
+    # # for i in seq_test_index:
+    # #     between_class_distance_seq.append(BetweenClassDistanceUpwards(between_class_distance[i]))
+    # # # 7. The mean distance and standard deviation in same class between points and barycenter
+    # # point_to_barycenter_mean = []
+    # # point_to_barycenter_deviation = []
+    # # for i in range(total_image_class):
+    # #     temp_dist = torch.tensor(0.0)
+    # #     for j in range(i*each_class_number,(i+1)*each_class_number):
+    # #         temp_dist = temp_dist + LossFunction(class_weight_berycenter[i],featurespace[j].feature_vector)
+    # #     temp_dist = temp_dist / each_class_number
+    # #     point_to_barycenter_mean.append(temp_dist)
+    # #
+    # # for i in range(total_image_class):
+    # #     temp_dist = torch.tensor(0.0)
+    # #     for j in range(i*each_class_number,(i+1)*each_class_number):
+    # #         temp_dist = temp_dist + (LossFunction(class_weight_berycenter[i],featurespace[j].feature_vector) - point_to_barycenter_mean[i])**2
+    # #     temp_dist = temp_dist / (each_class_number-1)
+    # #     temp_dist = torch.sqrt(temp_dist)
+    # #     point_to_barycenter_deviation.append(temp_dist)
+    # #
+    # # print("DATA PROCESSING END")
     #
-    # for i in seq_test_index:
-    #     between_class_distance_seq.append(BetweenClassDistanceUpwards(between_class_distance[i]))
-    # # 7. The mean distance and standard deviation in same class between points and barycenter
-    # point_to_barycenter_mean = []
-    # point_to_barycenter_deviation = []
-    # for i in range(total_image_class):
-    #     temp_dist = torch.tensor(0.0)
-    #     for j in range(i*each_class_number,(i+1)*each_class_number):
-    #         temp_dist = temp_dist + LossFunction(class_weight_berycenter[i],featurespace[j].feature_vector)
-    #     temp_dist = temp_dist / each_class_number
-    #     point_to_barycenter_mean.append(temp_dist)
-    #
-    # for i in range(total_image_class):
-    #     temp_dist = torch.tensor(0.0)
-    #     for j in range(i*each_class_number,(i+1)*each_class_number):
-    #         temp_dist = temp_dist + (LossFunction(class_weight_berycenter[i],featurespace[j].feature_vector) - point_to_barycenter_mean[i])**2
-    #     temp_dist = temp_dist / (each_class_number-1)
-    #     temp_dist = torch.sqrt(temp_dist)
-    #     point_to_barycenter_deviation.append(temp_dist)
-    #
-    # print("DATA PROCESSING END")
-
-    # SECTION:DBSCAN(Density-Based Spatial Clustering of Application with Noise)
+    # # SECTION:DBSCAN(Density-Based Spatial Clustering of Application with Noise)
     # for i in range(int(len(test_img_data)*0.1)):
     #     tempdata = test_img_data[i][0]
     #     test_out = net(torch.reshape(tempdata[0], (1, 1, 28, 28)))
@@ -391,9 +399,9 @@ if __name__ == '__main__':
     #     print('Number:',class_weight_berycenter[i].identity,'   times:',class_weight_berycenter[i].count)
 
 
-    # SECTION:Visualization
-
-
+    # # SECTION:Visualization
+    #
+    #
     test_data_featurespace = []
     for i in range(len(seq_test_index)):
         temp_feature = net(torch.reshape(test_img_data[seq_test_index[i]][0],(1,3,128,64))).squeeze(0)
