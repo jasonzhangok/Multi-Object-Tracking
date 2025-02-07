@@ -112,9 +112,9 @@ if __name__ == '__main__':
     test_index = 1
     #weight path
     weight_index = 19
-    pthfile = 'weights/weightCOS' + str(weight_index) + '.pth'
+    pthfile = 'weights/weight20481_' + str(weight_index) + '.pth'
     #train image data class
-    total_image_class = 8
+    total_image_class = 5
 
     #load train and test data
     test_img_data = torchvision.datasets.ImageFolder(test_mediumdata_path,transform=transform)
@@ -215,22 +215,45 @@ if __name__ == '__main__':
     #         temp_dist_list.append(dist)
     #     barycenter_distance.append(temp_dist_list)
     # 4. The distance between this point and all its same class points and the distance between this points and all its different class points
-    # in_class_distance = []
-    # each_class_number = int(len(test_img_data)/total_image_class)
-    # for i in range(total_image_class):
-    #     temp_dist_list = []
-    #     for j in range(each_class_number):
-    #         temp_dist_list.extend(point_distance[i*each_class_number+j][i*each_class_number:(i+1)*each_class_number])
-    #     in_class_distance.append(temp_dist_list)
-    # between_class_distance = []
-    # for i in range(len(point_distance)):
-    #     between_class_distance.append(point_distance[i])
-    # # between_class_distance = copy.deepcopy(point_distance.clone())
-    # for i in range(total_image_class):
-    #     temp_dist_list = []
-    #     for j in range(each_class_number):
-    #         del between_class_distance[i*each_class_number+j][i*each_class_number:(i+1)*each_class_number]
-    #
+    in_class_distance = []
+    each_class_number = int(len(test_img_data)/total_image_class)
+    for i in range(total_image_class):
+        temp_dist_list = []
+        for j in range(each_class_number):
+            temp_dist_list.extend(point_distance[i*each_class_number+j][i*each_class_number:(i+1)*each_class_number])
+        in_class_distance.append(temp_dist_list)
+    between_class_distance = []
+    for i in range(len(point_distance)):
+        between_class_distance.append(point_distance[i])
+    # between_class_distance = copy.deepcopy(point_distance.clone())
+    for i in range(total_image_class):
+        temp_dist_list = []
+        for j in range(each_class_number):
+            del between_class_distance[i*each_class_number+j][i*each_class_number:(i+1)*each_class_number]
+    #One matric: The number or percentage of between class distance smaller than the max in class distance
+    print(f"Total test data scale:{each_class_number * 4 * each_class_number}")
+    total_smaller_number = [0 for _ in range(total_image_class)]
+    for i in range(total_image_class):
+        combined = torch.cat([t.flatten() for t in in_class_distance[i]])
+        topk_values, topk_indices = torch.topk(combined, 100)
+        topk_values = topk_values.tolist()
+        topk_values = topk_values[0:100:2]
+        # count how many between class distance are smaller in class distance
+        cur_class_count = [0 for _ in range(50)]
+        for k in range(len(topk_values)):
+            for j in range(i*each_class_number,(i+1)*each_class_number):
+                for m in range((total_image_class-1) * each_class_number):
+                    if(between_class_distance[j][m] < topk_values[k]):
+                        cur_class_count[k] += 1
+        print(f"Class {i}: Larger count = {cur_class_count}")
+        total_smaller_number[i] = sum(cur_class_count)
+    print(f"Total smaller number: {total_smaller_number}")
+    print(1)
+
+
+
+
+
     # # # 5. The mean distance and standard deviation in class
     # # class_mean = []
     # # class_deviation = []
