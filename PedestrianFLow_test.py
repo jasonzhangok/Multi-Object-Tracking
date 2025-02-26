@@ -18,7 +18,7 @@ import copy
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'mps')
-ResNet50 = train.ResNet50
+MobileNetV3_Small = train.MobileNetV3_Small(2048)
 LossFunction = train.LossFunction
 
 
@@ -34,15 +34,31 @@ transform = transforms.Compose([
 class NumberWeight():
     def __init__(self):
         self.identity = -1
-        self.feature_vector = torch.empty([16])
+        self.feature_vector = torch.empty([2048])
         self.count = 0
-        self.weight = torch.empty([16])
+        self.weight = torch.empty([2048])
 
 class PersonImage():
     def __init__(self):
         self.count = 0
         self.featuremap = []
 
+
+class ImgEmbedding():
+    def __init__(self):
+        self.cate = -1
+        self.embedding = torch.empty([2048])
+        self.label = -1
+
+class ImgClass():
+    def __init__(self):
+        self.classindex = -1
+        self.count = 0
+
+class MyDistance():
+    def __init__(self):
+        self.distance = -1
+        self.identity = -1
 
 def MeanAndDeviation(points,number):
     points_2d = []
@@ -100,24 +116,22 @@ if __name__ == '__main__':
     #data path
     test_data_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/MNIST/data/mnist_test'
     # test_smalldata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/test_small'
-    test_smalldata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/query_small'
-    test_mediumdata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/query_medium'
-    #learning rate
-    initial_lr = 0.001
+    test_smalldata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/query_medium_modified'
+    test_mediumdata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/test_real_copy'
     #whether save model parameters and whether load moder
     net_load_flag = 1
     #different class threshold
-    threshold = 0.68
+    threshold = 0.6
     #whether test or not
     test_index = 1
     #weight path
-    weight_index = 19
-    pthfile = 'weights/weight20481_' + str(weight_index) + '.pth'
+    weight_index = 52
+    pthfile = 'weights/weight_mobile_2048_' + str(weight_index) + '.pth'
     #train image data class
-    total_image_class = 5
+    total_image_class = 15
 
     #load train and test data
-    test_img_data = torchvision.datasets.ImageFolder(test_mediumdata_path,transform=transform)
+    test_img_data = torchvision.datasets.ImageFolder(test_smalldata_path,transform=transform)
     #test_data = torch.utils.data.DataLoader(test_img_data, batch_size=1,shuffle=True, num_workers=4,drop_last=True)
     #calculate the begin index of each class
 
@@ -126,13 +140,13 @@ if __name__ == '__main__':
     #test
     print("Testing:")
     #enter net testing module
-    net = ResNet50()
+    net = MobileNetV3_Small
     temp = torch.load(pthfile, map_location=DEVICE)
     net.load_state_dict(temp)
     net.eval()
     correct_class_num = 0
     #ATTEN: There is not need for us to classify whether the test image belongs to the right class as input We just need to decide how many class we have and when input a new image, we classify it to the correct class
-    class_count = 0
+    class_num= 0
 
     # SECTION:Organize and analysis in_class_dist and between_class_dist
     # Calculate distance There are some problem
@@ -145,47 +159,47 @@ if __name__ == '__main__':
 
     # shuffle test dataset index
     shuffle_test_index = [i for i in range(len(test_img_data))]
-    # random.shuffle(shuffle_test_index)
+    random.shuffle(shuffle_test_index)
     # sequence test dataset index
     seq_test_index = shuffle_test_index[:int(len(test_img_data))]
-    # seq_test_index.sort()
+    seq_test_index.sort()
 
     # class_weight_berycenter: store image tags(class) and the output of the net with the image input to calculate the barycenter
-    class_weight_berycenter = []
+    # class_weight_berycenter = []
+    #
+    # featurespace = []
 
-    featurespace = []
-
-    # # SECTION:Distance Calculation:
-    # #TODO:
-    # # 1. The distance between this point and all the other 8000-1 = 7999 points
-    # # 2. The distance between this point and all class barycenters(10)
-    # # 3. The distance between all the class barycenters
-    # # 4. The distance between this point and all its same class points and the distance between this points and all its different class points
-    # # 5. The mean distance  and standard deviation in class
-    # # 6. The max 2 distance between class and min 2 distance in class
-    # # 7. The mean distance and standard deviation in same class between points and barycenter
-    # #Map images to 16-D space
-    for i in seq_test_index:
-        tempdata = test_img_data[i][0]
-        test_out = net(torch.reshape(tempdata, (1, 3, 128, 64)))
-        feature = NumberWeight()
-        feature.feature_vector = test_out
-        feature.identity = test_img_data[i][1]
-        #add the feature vector of the test data into feature space
-        featurespace.append(feature)
-    #1.The distance between this point and all the other 8000-1 = 7999 points
-    point_distance = []
-    for i in seq_test_index:
-        temp_dist_list = []
-        for j in seq_test_index:
-            if( i != j):
-                dist = LossFunction(featurespace[i].feature_vector.squeeze(0), featurespace[j].feature_vector.squeeze(0))
-            else:
-                dist = torch.tensor(0.0)
-            temp_dist_list.append(dist)
-        point_distance.append(temp_dist_list)
-    point_distance = tuple(point_distance)
-
+    # SECTION:Distance Calculation:
+    #EXPLANA:
+    # 1. The distance between this point and all the other 8000-1 = 7999 points
+    # 2. The distance between this point and all class barycenters(10)
+    # 3. The distance between all the class barycenters
+    # 4. The distance between this point and all its same class points and the distance between this points and all its different class points
+    # 5. The mean distance  and standard deviation in class
+    # 6. The max 2 distance between class and min 2 distance in class
+    # 7. The mean distance and standard deviation in same class between points and barycenter
+    #Map images to 16-D space
+    # for i in seq_test_index:
+    #     tempdata = test_img_data[i][0]
+    #     test_out = net(torch.reshape(tempdata, (1, 3, 128, 64)))
+    #     feature = NumberWeight()
+    #     feature.feature_vector = test_out
+    #     feature.identity = test_img_data[i][1]
+    #     #add the feature vector of the test data into feature space
+    #     featurespace.append(feature)
+    # #1.The distance between this point and all the other 8000-1 = 7999 points
+    # point_distance = []
+    # for i in seq_test_index:
+    #     temp_dist_list = []
+    #     for j in seq_test_index:
+    #         if( i != j):
+    #             dist = LossFunction(featurespace[i].feature_vector.squeeze(0), featurespace[j].feature_vector.squeeze(0))
+    #         else:
+    #             dist = torch.tensor(0.0)
+    #         temp_dist_list.append(dist)
+    #     point_distance.append(temp_dist_list)
+    # point_distance = tuple(point_distance)
+    #
     #
     #
     # #2. The distance between this point and all class barycenters(10)
@@ -214,41 +228,41 @@ if __name__ == '__main__':
     #             dist = torch.tensor(0.0)
     #         temp_dist_list.append(dist)
     #     barycenter_distance.append(temp_dist_list)
-    # 4. The distance between this point and all its same class points and the distance between this points and all its different class points
-    in_class_distance = []
-    each_class_number = int(len(test_img_data)/total_image_class)
-    for i in range(total_image_class):
-        temp_dist_list = []
-        for j in range(each_class_number):
-            temp_dist_list.extend(point_distance[i*each_class_number+j][i*each_class_number:(i+1)*each_class_number])
-        in_class_distance.append(temp_dist_list)
-    between_class_distance = []
-    for i in range(len(point_distance)):
-        between_class_distance.append(point_distance[i])
-    # between_class_distance = copy.deepcopy(point_distance.clone())
-    for i in range(total_image_class):
-        temp_dist_list = []
-        for j in range(each_class_number):
-            del between_class_distance[i*each_class_number+j][i*each_class_number:(i+1)*each_class_number]
-    #One matric: The number or percentage of between class distance smaller than the max in class distance
-    print(f"Total test data scale:{each_class_number * 4 * each_class_number}")
-    total_smaller_number = [0 for _ in range(total_image_class)]
-    for i in range(total_image_class):
-        combined = torch.cat([t.flatten() for t in in_class_distance[i]])
-        topk_values, topk_indices = torch.topk(combined, 100)
-        topk_values = topk_values.tolist()
-        topk_values = topk_values[0:100:2]
-        # count how many between class distance are smaller in class distance
-        cur_class_count = [0 for _ in range(50)]
-        for k in range(len(topk_values)):
-            for j in range(i*each_class_number,(i+1)*each_class_number):
-                for m in range((total_image_class-1) * each_class_number):
-                    if(between_class_distance[j][m] < topk_values[k]):
-                        cur_class_count[k] += 1
-        print(f"Class {i}: Larger count = {cur_class_count}")
-        total_smaller_number[i] = sum(cur_class_count)
-    print(f"Total smaller number: {total_smaller_number}")
-    print(1)
+    # #4. The distance between this point and all its same class points and the distance between this points and all its different class points
+    # in_class_distance = []
+    # each_class_number = int(len(test_img_data)/total_image_class)
+    # for i in range(total_image_class):
+    #     temp_dist_list = []
+    #     for j in range(each_class_number):
+    #         temp_dist_list.extend(point_distance[i*each_class_number+j][i*each_class_number:(i+1)*each_class_number])
+    #     in_class_distance.append(temp_dist_list)
+    # between_class_distance = []
+    # for i in range(len(point_distance)):
+    #     between_class_distance.append(point_distance[i])
+    # # between_class_distance = copy.deepcopy(point_distance.clone())
+    # for i in range(total_image_class):
+    #     temp_dist_list = []
+    #     for j in range(each_class_number):
+    #         del between_class_distance[i*each_class_number+j][i*each_class_number:(i+1)*each_class_number]
+    # #One matric: The number or percentage of between class distance smaller than the max in class distance
+    # print(f"Total test data scale:{each_class_number * (total_image_class - 1) * each_class_number}")
+    # total_smaller_number = [0 for _ in range(total_image_class)]
+    # for i in range(total_image_class):
+    #     combined = torch.cat([t.flatten() for t in in_class_distance[i]])
+    #     topk_values, topk_indices = torch.topk(combined, 100)
+    #     topk_values = topk_values.tolist()
+    #     topk_values = topk_values[0:100:2]
+    #     # count how many between class distance are smaller in class distance
+    #     cur_class_num = [0 for _ in range(50)]
+    #     for k in range(len(topk_values)):
+    #         for j in range(i*each_class_number,(i+1)*each_class_number):
+    #             for m in range((total_image_class-1) * each_class_number):
+    #                 if(between_class_distance[j][m] < topk_values[k]):
+    #                     cur_class_num[k] += 1
+    #     print(f"Class {i}: Larger count = {cur_class_num}")
+    #     total_smaller_number[i] = sum(cur_class_num)
+    # print(f"Total smaller number: {total_smaller_number}")
+    # print(1)
 
 
 
@@ -289,15 +303,6 @@ if __name__ == '__main__':
     # #
     # # print("DATA PROCESSING END")
     #
-    # # SECTION:DBSCAN(Density-Based Spatial Clustering of Application with Noise)
-    # for i in range(int(len(test_img_data)*0.1)):
-    #     tempdata = test_img_data[i][0]
-    #     test_out = net(torch.reshape(tempdata[0], (1, 1, 28, 28)))
-    #     feature = NumberWeight()
-    #     feature.feature_vector = test_out
-    #     feature.identity = test_img_data[i][1]
-    #     #add the feature vector of the test data into feature space
-    #     featurespace.append(feature)
 
 
 
@@ -376,7 +381,8 @@ if __name__ == '__main__':
 
 
 
-    # # SECTION:Test accuracy: static threshold
+    # SECTION:Test accuracy: static threshold
+    # EXPLANA: Cluster using the barycenter of each class
     # print_times = 0
     # for j in shuffle_test_index:
     #     print_times = print_times + 1
@@ -422,63 +428,65 @@ if __name__ == '__main__':
     #     print('Number:',class_weight_berycenter[i].identity,'   times:',class_weight_berycenter[i].count)
 
 
-    # # SECTION:Visualization
-    #
-    #
-    test_data_featurespace = []
-    for i in range(len(seq_test_index)):
-        temp_feature = net(torch.reshape(test_img_data[seq_test_index[i]][0],(1,3,128,64))).squeeze(0)
-        # original 28*28 to 2D
-        # temp_feature = torch.reshape(test_img_data[seq_test_index[i]][0],(-1,))
-        temp_feature = temp_feature.detach().numpy()
-        test_data_featurespace.append(temp_feature)
+    # SECTION:DB-SCAN
+    #Record all the embeddings of test images
+    count_threshold = 2
+    imgs_embeddings = []
+    imgs_classes = []
+    print_times = 0
+    for j in shuffle_test_index:
+        print_times = print_times + 1
+        # test = []
+        # test.append(test_img_data[j][0])
+        # test.append(test_img_data[j][1])
 
-    test_data_featurespace_np = np.stack(test_data_featurespace)
+        temp_out = net(torch.reshape(test_img_data[j][0],(1,3,128,64)))
+        img_embedding = ImgEmbedding()
+        img_embedding.label = test_img_data[j][1]
+        img_embedding.embedding = temp_out
+        # test_out = F.normalize(test_out, p=2, dim=1)
+        imgs_embeddings.append(img_embedding)
 
-    colors = sns.color_palette("tab10", 10)
-    TSNE_dim = 2
-    tsne = TSNE(n_components=TSNE_dim, init='pca', random_state=501)
-    X_pca = decomposition.TruncatedSVD(n_components=200).fit_transform(test_data_featurespace_np)
-    res = tsne.fit_transform(X_pca)
-    color_flag = [0 for _ in range(10)]
-    # X_tsne = tsne.fit_transform(test_data_featurespace)
-    if(TSNE_dim == 2):
-        for i in range(len(res)):
-            for j in range(10):
-                if(test_img_data[seq_test_index[i]][1]==j):
-                    if(color_flag[j] == 0):
-                        plt.scatter(res[i, 0], res[i, 1], c=colors[j], label = f'Class {j}', alpha=0.6)
-                        color_flag[j] = 1
-                    else:
-                        plt.scatter(res[i, 0], res[i, 1], c=colors[j], alpha=0.6)
-        plt.xlabel('TSNE Component 1')
-        plt.ylabel('TSNE Component 2')
-        plt.title('t-SNE Visualization of 16D Data in 2D Original MNIST ')
-
-    if(TSNE_dim == 3):
-        fig = plt.figure(figsize=(8, 6))
-        ax = fig.add_subplot(111, projection='3d')
-
-        for i in range(len(res)):
-            for j in range(10):
-                if(test_img_data[seq_test_index[i]][1]==j):
-                    if(color_flag[j] == 0):
-                        ax.scatter(res[i, 0], res[i, 1], c=colors[j], label = f'Class {j}', alpha=0.6)
-                        color_flag[j] = 1
-                    else:
-                        ax.scatter(res[i, 0], res[i, 1], c=colors[j], alpha=0.6)
-
-        ax.set_xlabel('TSNE Component 1')
-        ax.set_ylabel('TSNE Component 2')
-        ax.set_zlabel('TSNE Component 3')
-        ax.set_title('t-SNE Visualization of 16D Data in 3D')
-
-    plt.legend()
-    plt.show()
-
-
-
-
-
-
-
+        #Calculate the distance between test image and all the other tested images
+        if(class_num == 0):
+            class_num = class_num + 1
+            img_embedding.cate = class_num - 1
+            temp_class = ImgClass()
+            temp_class.classindex = img_embedding.cate
+            temp_class.count = 1
+            imgs_classes.append(temp_class)
+            continue
+        distance = []
+        for i in imgs_embeddings:
+            temp_distance = MyDistance()
+            temp_dist = LossFunction(i.embedding,temp_out)
+            temp_distance.distance = temp_dist
+            temp_distance.identity = i.cate
+            distance.append(temp_distance)
+        distance.sort(key=lambda x:x.distance)
+        #A new class
+        if(distance[1].distance > threshold):
+            class_num = class_num + 1
+            temp_class = ImgClass()
+            img_embedding.cate = class_num - 1
+            temp_class.classindex = img_embedding.cate
+            temp_class.count = 1
+            imgs_classes.append(temp_class)
+        elif(print_times < 10):#TODO：10 there need to be changed
+            closest_class = distance[1].identity
+            for k in imgs_classes:
+                if k.classindex == closest_class:
+                    k.count = k.count + 1
+                    break
+        else:
+            temp_distance_count = [0 for _ in  range(len(imgs_classes))]
+            for i in distance[1:]:
+                temp_distance_count[i.identity] = temp_distance_count[i.identity] + 1
+                if(temp_distance_count[i.identity] >= count_threshold):
+                    break
+            closest_class = temp_distance_count.index(2)
+            imgs_classes[closest_class]
+            for k in imgs_classes:
+                if k.classindex == closest_class:
+                    k.count = k.count + 1
+                    break
