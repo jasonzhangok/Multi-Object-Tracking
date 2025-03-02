@@ -1,24 +1,12 @@
-import copy
-import sklearn.manifold
 import torch
-import numpy as np
-from torch import nn
-from torch.nn import functional as F
 import torchvision
-from torch.autograd import Variable
 from torchvision import transforms
 import random
-from tqdm import tqdm
 import train
-import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
-import seaborn as sns
-from sklearn import decomposition
-import copy
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'mps')
-MobileNetV3_Small = train.MobileNetV3_Small(2048)
+MobileNetV3_Small = train.MobileNetV3_Small(512)
 LossFunction = train.LossFunction
 
 
@@ -46,10 +34,11 @@ class PersonImage():
 
 class ImgEmbedding():
     def __init__(self):
-        self.cate = -1
+        self.cate = -1 #cate 表示预测的类别
         self.embedding = torch.empty([2048])
-        self.label = -1
+        self.label = -1 #label 表示真实的类别
 
+#表示划分的类别的数量和是哪一个类别
 class ImgClass():
     def __init__(self):
         self.classindex = -1
@@ -117,21 +106,22 @@ if __name__ == '__main__':
     test_data_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/MNIST/data/mnist_test'
     # test_smalldata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/test_small'
     test_smalldata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/query_medium_modified'
-    test_mediumdata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/test_real_copy'
+    test_mediumdata_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/query_small'
+    test_reality_path = '/Users/jason/IdeaProjects/PeopleFlowDetection/PedestrianFlow/data/test_real_copy'
     #whether save model parameters and whether load moder
     net_load_flag = 1
     #different class threshold
-    threshold = 0.6
+    threshold = 0.2
     #whether test or not
     test_index = 1
     #weight path
-    weight_index = 52
-    pthfile = 'weights/weight_mobile_2048_' + str(weight_index) + '.pth'
+    weight_index = 49
+    pthfile = 'weights/weight_mobile_512_' + str(weight_index) + '.pth'
     #train image data class
     total_image_class = 15
 
     #load train and test data
-    test_img_data = torchvision.datasets.ImageFolder(test_smalldata_path,transform=transform)
+    test_img_data = torchvision.datasets.ImageFolder(test_mediumdata_path,transform=transform)
     #test_data = torch.utils.data.DataLoader(test_img_data, batch_size=1,shuffle=True, num_workers=4,drop_last=True)
     #calculate the begin index of each class
 
@@ -167,8 +157,6 @@ if __name__ == '__main__':
     # class_weight_berycenter: store image tags(class) and the output of the net with the image input to calculate the barycenter
     # class_weight_berycenter = []
     #
-    # featurespace = []
-
     # SECTION:Distance Calculation:
     #EXPLANA:
     # 1. The distance between this point and all the other 8000-1 = 7999 points
@@ -179,6 +167,7 @@ if __name__ == '__main__':
     # 6. The max 2 distance between class and min 2 distance in class
     # 7. The mean distance and standard deviation in same class between points and barycenter
     #Map images to 16-D space
+    # featurespace = []
     # for i in seq_test_index:
     #     tempdata = test_img_data[i][0]
     #     test_out = net(torch.reshape(tempdata, (1, 3, 128, 64)))
@@ -430,63 +419,71 @@ if __name__ == '__main__':
 
     # SECTION:DB-SCAN
     #Record all the embeddings of test images
-    count_threshold = 2
-    imgs_embeddings = []
-    imgs_classes = []
-    print_times = 0
-    for j in shuffle_test_index:
-        print_times = print_times + 1
-        # test = []
-        # test.append(test_img_data[j][0])
-        # test.append(test_img_data[j][1])
-
-        temp_out = net(torch.reshape(test_img_data[j][0],(1,3,128,64)))
-        img_embedding = ImgEmbedding()
-        img_embedding.label = test_img_data[j][1]
-        img_embedding.embedding = temp_out
-        # test_out = F.normalize(test_out, p=2, dim=1)
-        imgs_embeddings.append(img_embedding)
-
-        #Calculate the distance between test image and all the other tested images
-        if(class_num == 0):
-            class_num = class_num + 1
-            img_embedding.cate = class_num - 1
-            temp_class = ImgClass()
-            temp_class.classindex = img_embedding.cate
-            temp_class.count = 1
-            imgs_classes.append(temp_class)
-            continue
-        distance = []
-        for i in imgs_embeddings:
-            temp_distance = MyDistance()
-            temp_dist = LossFunction(i.embedding,temp_out)
-            temp_distance.distance = temp_dist
-            temp_distance.identity = i.cate
-            distance.append(temp_distance)
-        distance.sort(key=lambda x:x.distance)
-        #A new class
-        if(distance[1].distance > threshold):
-            class_num = class_num + 1
-            temp_class = ImgClass()
-            img_embedding.cate = class_num - 1
-            temp_class.classindex = img_embedding.cate
-            temp_class.count = 1
-            imgs_classes.append(temp_class)
-        elif(print_times < 10):#TODO：10 there need to be changed
-            closest_class = distance[1].identity
-            for k in imgs_classes:
-                if k.classindex == closest_class:
-                    k.count = k.count + 1
-                    break
-        else:
-            temp_distance_count = [0 for _ in  range(len(imgs_classes))]
-            for i in distance[1:]:
-                temp_distance_count[i.identity] = temp_distance_count[i.identity] + 1
-                if(temp_distance_count[i.identity] >= count_threshold):
-                    break
-            closest_class = temp_distance_count.index(2)
-            imgs_classes[closest_class]
-            for k in imgs_classes:
-                if k.classindex == closest_class:
-                    k.count = k.count + 1
-                    break
+    # count_threshold = 2
+    # imgs_embeddings = []
+    # imgs_classes = []
+    # print_times = 0
+    # #maplist list record the map relation between image cate and label, cate is the label calculated by our algorithm and the label is the ground-truth label
+    # maplist = []
+    # for j in shuffle_test_index:
+    #     print_times = print_times + 1
+    #     # test = []
+    #     # test.append(test_img_data[j][0])
+    #     # test.append(test_img_data[j][1])
+    #
+    #     temp_out = net(torch.reshape(test_img_data[j][0],(1,3,128,64)))
+    #     img_embedding = ImgEmbedding()
+    #     img_embedding.label = test_img_data[j][1]
+    #     img_embedding.embedding = temp_out
+    #     # test_out = F.normalize(test_out, p=2, dim=1)
+    #     imgs_embeddings.append(img_embedding)
+    #
+    #     #Clustering
+    #     if(class_num == 0):
+    #         class_num = 1
+    #         img_embedding.cate = 0
+    #         maplist.append(img_embedding.label)
+    #         temp_class = ImgClass()
+    #         temp_class.classindex = img_embedding.cate
+    #         temp_class.count = 1
+    #         imgs_classes.append(temp_class)
+    #         correct_class_num = correct_class_num + 1
+    #         continue
+    #     distance = []
+    #     for i in imgs_embeddings:
+    #         temp_distance = MyDistance()
+    #         temp_dist = LossFunction(i.embedding,temp_out)
+    #         temp_distance.distance = temp_dist
+    #         temp_distance.identity = i.cate
+    #         distance.append(temp_distance)
+    #     distance.sort(key=lambda x:x.distance)
+    #     #Judge whether the new embedding belongs to a new class
+    #     if(distance[1].distance > threshold):
+    #         class_num = class_num + 1
+    #         temp_class = ImgClass()
+    #         img_embedding.cate = class_num - 1
+    #         maplist.append(img_embedding.label)
+    #         temp_class.classindex = img_embedding.cate
+    #         temp_class.count = 1
+    #         imgs_classes.append(temp_class)
+    #         correct_class_num = correct_class_num + 1
+    #     elif(min(imgs_classes,key = lambda x:x.count).count < count_threshold):#TODO：10 there need to be changed
+    #         closest_class = distance[1].identity
+    #         imgs_classes[closest_class].count = imgs_classes[closest_class].count + 1
+    #         img_embedding.cate = closest_class
+    #     else:
+    #         temp_distance_count = [0 for _ in  range(len(imgs_classes))]
+    #         for i in distance[1:]:
+    #             temp_distance_count[i.identity] = temp_distance_count[i.identity] + 1
+    #             if(temp_distance_count[i.identity] >= count_threshold):
+    #                 break
+    #         closest_class = temp_distance_count.index(count_threshold)
+    #         imgs_classes[closest_class].count = imgs_classes[closest_class].count + 1
+    #         img_embedding.cate = closest_class
+    #         if(img_embedding.label == maplist[img_embedding.cate]):
+    #             correct_class_num = correct_class_num + 1
+    #
+    # print('Clusterd class num:',class_num)
+    # print("accuracy = %.2f%%"%(correct_class_num / len(shuffle_test_index) * 100))
+    # for i in range(len(maplist)):
+    #     print('class:',maplist[i],'   times:',imgs_classes[i].count)
