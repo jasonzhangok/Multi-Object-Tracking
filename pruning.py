@@ -1,42 +1,8 @@
 import torch
-import platform
-from pathlib import Path
-from models.yolo import Model
-import pathlib
-from utils.torch_utils import profile  # 用于计算 FLOPs
-import torch
-import torch.nn.utils.prune as prune
+import torch.nn as nn
 import time
 
-# 设置平台兼容性
-plt = platform.system()
-if plt != 'Windows':
-    pathlib.WindowsPath = pathlib.PosixPath
-
-# 获取 YOLOv5 根目录
-FILE = Path(__file__).resolve()
-ROOT = FILE.parents[0]  # YOLOv5 root directory
-
-def prune_weights(model, prune_ratio):
-    for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Conv2d):  # 只剪枝卷积层
-            weight = module.weight.data
-            num_weights = weight.numel()  # 权重总数
-            prune_weights = int(num_weights * prune_ratio)  # 计算需要剪枝的权重数量
-            # 计算权重重要性（使用 L1 范数）
-            importance = weight.abs()  # 计算每个权重的 L1 范数
-            sorted_idx = importance.view(-1).argsort()  # 按重要性排序
-            prune_idx = sorted_idx[:prune_weights]  # 选择最不重要的权重
-
-            # 移除不重要的权重
-            mask = torch.ones_like(weight)
-            mask.view(-1)[prune_idx] = 0  # 标记需要剪枝的权重
-            module.weight.data = weight * mask  # 剪枝权重
-
-    return model
-
 def model_structure(model):
-    eps = 1e-5
     blank = ' '
     print('-' * 90)
     print('|' + ' ' * 11 + 'weight name' + ' ' * 10 + '|' \
@@ -55,13 +21,6 @@ def model_structure(model):
         each_para = 1
         for k in w_variable.shape:
             each_para *= k
-        flatten_variable = w_variable.view(-1)
-        zero_count = 0
-        for i in flatten_variable:
-            if abs(i - 0.0) < eps:
-                zero_count = zero_count + 1
-                i = 0
-        each_para = each_para - zero_count
         num_para += each_para
         str_num = str(each_para)
         if len(str_num) <= 10:
@@ -73,89 +32,95 @@ def model_structure(model):
     print('The parameters of Model {}: {:4f}M'.format(model._get_name(), num_para * type_size / 1000 / 1000))
     print('-' * 90)
 
-# 使用稀疏计算
-def sparse_forward(model, x):
-    with torch.no_grad():
-        for name, module in model.named_modules():
-            if isinstance(module, torch.nn.Conv2d):
-                # 将权重转换为稀疏张量
-                sparse_weight = module.weight.to_sparse()
-                x = torch.nn.functional.conv2d(x, sparse_weight, module.bias, module.stride, module.padding, module.dilation, module.groups)
-            else:
-                x = module(x)
-    return x
+# 定义一个简单的 CNN 模型
+class SimpleCNN(nn.Module):
+    def __init__(self):
+        super(SimpleCNN, self).__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)  # 输入通道 3，输出通道 16
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)  # 输入通道 16，输出通道 32
+        self.fc1 = nn.Linear(32 * 8 * 8, 128)  # 假设输入图像大小为 32x32
+        self.fc2 = nn.Linear(128, 10)  # 10 个类别
 
+    def forward(self, x):
+        x = torch.relu(self.conv1(x))
+        x = torch.max_pool2d(x, kernel_size=2, stride=2)  # 16x16
+        x = torch.relu(self.conv2(x))
+        x = torch.max_pool2d(x, kernel_size=2, stride=2)  # 8x8
+        x = x.view(x.size(0), -1)  # 展平
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
 
-def test_time(model,test_data,way):
-    if(way == 0):
-        # 计算推理时间
-        start_time = time.time()
-        with torch.no_grad():
-            _ = model(test_data)  # 处理 100 个测试用例
-        end_time = time.time()
+def prune_channels(model, prune_ratio):
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Conv2d):  # 只剪枝卷积层
+            weight = module.weight.data
+            out_channels = weight.shape[0]  # 输出通道数
+            prune_channels = int(out_channels * prune_ratio)  # 计算需要剪枝的通道数
 
-        # 计算平均推理时间
-        total_time = end_time - start_time
-        print(f"总推理时间: {total_time:.4f} 秒")
-        return total_time
-    else:
-        start_time = time.time()
-        with torch.no_grad():
-            _ = sparse_forward(model,test_data)  # 处理 100 个测试用例
-        end_time = time.time()
-        total_time = end_time - start_time
-        print(f"总推理时间: {total_time:.4f} 秒")
-        return total_time
+            # 计算通道重要性（使用 L1 范数）
+            importance = weight.abs().sum(dim=(1, 2, 3))  # 计算每个通道的 L1 范数
+            sorted_idx = importance.argsort()  # 按重要性排序
+            prune_idx = sorted_idx[:prune_channels]  # 选择最不重要的通道
 
+            # 移除不重要的通道
+            mask = torch.ones(out_channels, dtype=bool)
+            mask[prune_idx] = False  # 标记需要剪枝的通道
+            module.weight.data = module.weight.data[mask]  # 剪枝权重
+            if module.bias is not None:
+                module.bias.data = module.bias.data[mask]  # 剪枝偏置
 
+            # 更新下一层的输入通道数
+            if isinstance(module, nn.Conv2d):
+                next_convs = []
+                for _, next_module in model.named_modules():
+                    if isinstance(next_module, nn.Conv2d) and next_module.in_channels == out_channels:
+                        next_convs.append(next_module)
+                if next_convs:
+                    for next_conv in next_convs:
+                        # 确保下一层的输入通道数与剪枝后的通道数一致
+                        if next_conv.weight.data.shape[1] == out_channels:
+                            next_conv.weight.data = next_conv.weight.data[:, mask]  # 更新下一层的输入通道
+                        else:
+                            print(f"Skipping {name}: next layer input channels do not match.")
+                else:
+                    print(f"Skipping {name}: no next conv layer found.")
 
-if __name__ == "__main__":
-    model = Model(ROOT / "models/yolov5s.yaml")  # 使用 YOLOv5s 配置文件
-    model.eval()
-    test_data = torch.randn(100, 3, 640, 640)
+    return model
 
-    # 加载训练好的权重
-    checkpoint = torch.load(ROOT / "best.pt", map_location="mps")  # 加载权重文件
-    model.load_state_dict(checkpoint["model"].state_dict())  # 加载模型权重
-    # model_structure(model)
+def update_fc_layer(model):
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            # 获取卷积层的输出通道数
+            out_channels = module.weight.data.shape[0]
+            # 假设输入图像大小为 32x32，经过两次池化后大小为 8x8
+            fc_input_features = out_channels * 8 * 8
+            # 更新全连接层的输入特征数
+            if hasattr(model, 'fc1'):
+                model.fc1 = nn.Linear(fc_input_features, 128)
+    return model
 
-    # 计算剪枝前的推理时间
-    start_time = time.time()
-    with torch.no_grad():
-        _ = model(test_data)  # 处理 100 个测试用例
-    end_time = time.time()
-    total_time = end_time - start_time
-    print(f"剪枝前的总推理时间: {total_time:.4f} 秒")
+# 初始化模型
+model = SimpleCNN()
+input_tensor = torch.randn(100, 3, 32, 32)  # 假设输入图像大小为 32x32
 
-    prune_ratio = 0.2
+# 测试剪枝前的推理时间
+start_time = time.time()
+with torch.no_grad():
+    _ = model(input_tensor)
+end_time = time.time()
+print(f"剪枝前的推理时间: {end_time - start_time:.6f} 秒")
+model_structure(model)
+# 定义剪枝比例
+prune_ratio = 0.2  # 剪枝 20% 的通道
 
-    # 执行剪枝
-    pruned_model = prune_weights(model, prune_ratio)
-
-    # 计算剪枝后的推理时间
-    start_time = time.time()
-    with torch.no_grad():
-        _ = sparse_forward(pruned_model, test_data)  # 处理 100 个测试用例
-    end_time = time.time()
-    total_time_pruned = end_time - start_time
-    print(f"剪枝后的总推理时间: {total_time_pruned:.4f} 秒")
-
-    # 计算加速比
-    speedup = total_time / total_time_pruned
-    print(f"加速比: {speedup:.2f}x")
-
-
-    # time1 = test_time(model, test_data,0)
-    #
-    # prune_ratio = 0.2
-    #
-    # # 执行剪枝
-    # pruned_model = prune_weights(model, prune_ratio)
-    # time2 = test_time(model, test_data,1)
-    # print(time2 - time1)
-    # # model_structure(model)
-
-
-    # for name, module in model.named_modules():
-    #     if isinstance(module, torch.nn.Conv2d):  # 只剪枝卷积层
-    #         prune.ln_structured(module, name="weight", amount=0.1, n=2, dim=0)
+# 执行剪枝
+pruned_model = prune_channels(model, prune_ratio)
+pruned_model = update_fc_layer(pruned_model)
+# 测试剪枝后的推理时间
+start_time = time.time()
+with torch.no_grad():
+    _ = pruned_model(input_tensor)
+end_time = time.time()
+print(f"剪枝后的推理时间: {end_time - start_time:.6f} 秒")
+model_structure(pruned_model)
