@@ -88,7 +88,7 @@ def prune_channels(model, prune_ratio):
 
     return model
 
-def update_fc_layer(model):
+def update_layer(model):
     for name, module in model.named_modules():
         if isinstance(module, nn.Conv2d):
             # 获取卷积层的输出通道数
@@ -98,6 +98,18 @@ def update_fc_layer(model):
             # 更新全连接层的输入特征数
             if hasattr(model, 'fc1'):
                 model.fc1 = nn.Linear(fc_input_features, 128)
+        if isinstance(module, nn.Conv2d):  # 找到卷积层
+            out_channels = module.weight.data.shape[0]  # 剪枝后的输出通道数
+            # 找到对应的 BN 层
+            for bn_name, bn_module in model.named_modules():
+                if isinstance(bn_module, nn.BatchNorm2d) and bn_name == name.replace("conv", "bn"):
+                    # 更新 BN 层的 running_mean 和 running_var
+                    bn_module.running_mean = bn_module.running_mean[:out_channels]
+                    bn_module.running_var = bn_module.running_var[:out_channels]
+                    # 更新 BN 层的权重和偏置
+                    bn_module.weight.data = bn_module.weight.data[:out_channels]
+                    bn_module.bias.data = bn_module.bias.data[:out_channels]
+
     return model
 
 # 初始化模型
@@ -116,7 +128,7 @@ prune_ratio = 0.2  # 剪枝 20% 的通道
 
 # 执行剪枝
 pruned_model = prune_channels(model, prune_ratio)
-pruned_model = update_fc_layer(pruned_model)
+pruned_model = update_layer(pruned_model)
 # 测试剪枝后的推理时间
 start_time = time.time()
 with torch.no_grad():
