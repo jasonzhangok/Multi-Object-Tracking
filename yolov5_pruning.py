@@ -3,6 +3,7 @@ import torch.nn as nn
 import time
 
 def model_structure(model):
+    eps = 1e-5
     blank = ' '
     print('-' * 90)
     print('|' + ' ' * 11 + 'weight name' + ' ' * 10 + '|' \
@@ -21,6 +22,12 @@ def model_structure(model):
         each_para = 1
         for k in w_variable.shape:
             each_para *= k
+        flatten_variable = w_variable.view(-1)
+        zero_count = 0
+        for i in flatten_variable:
+            if abs(i) < eps:
+                zero_count = zero_count + 1
+        each_para = each_para - zero_count
         num_para += each_para
         str_num = str(each_para)
         if len(str_num) <= 10:
