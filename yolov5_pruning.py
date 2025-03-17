@@ -1,145 +1,111 @@
 import torch
+import platform
+from pathlib import Path
+from models.yolo import Model
+import pathlib
+from utils.torch_utils import profile  # 用于计算 FLOPs
+import torch
+import torch.nn.utils.prune as prune
 import torch.nn as nn
-import time
+from torchvision.models import densenet121
+import torch_pruning as tp
+from copy import deepcopy
+from utils.torch_utils import (
+    EarlyStopping,
+    ModelEMA,
+    de_parallel,
+    select_device,
+    smart_DDP,
+    smart_optimizer,
+    smart_resume,
+    torch_distributed_zero_first,
+)
+from utils.downloads import attempt_download
 
-def model_structure(model):
-    eps = 1e-5
-    blank = ' '
-    print('-' * 90)
-    print('|' + ' ' * 11 + 'weight name' + ' ' * 10 + '|' \
-          + ' ' * 15 + 'weight shape' + ' ' * 15 + '|' \
-          + ' ' * 3 + 'number' + ' ' * 3 + '|')
-    print('-' * 90)
-    num_para = 0
-    type_size = 1  # 如果是浮点数就是4
 
-    for index, (key, w_variable) in enumerate(model.named_parameters()):
-        if len(key) <= 30:
-            key = key + (30 - len(key)) * blank
-        shape = str(w_variable.shape)
-        if len(shape) <= 40:
-            shape = shape + (40 - len(shape)) * blank
-        each_para = 1
-        for k in w_variable.shape:
-            each_para *= k
-        flatten_variable = w_variable.view(-1)
-        zero_count = 0
-        for i in flatten_variable:
-            if abs(i) < eps:
-                zero_count = zero_count + 1
-        each_para = each_para - zero_count
-        num_para += each_para
-        str_num = str(each_para)
-        if len(str_num) <= 10:
-            str_num = str_num + (10 - len(str_num)) * blank
 
-        print('| {} | {} | {} |'.format(key, shape, str_num))
-    print('-' * 90)
-    print('The total number of parameters: ' + str(num_para))
-    print('The parameters of Model {}: {:4f}M'.format(model._get_name(), num_para * type_size / 1000 / 1000))
-    print('-' * 90)
 
-# 定义一个简单的 CNN 模型
-class SimpleCNN(nn.Module):
-    def __init__(self):
-        super(SimpleCNN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)  # 输入通道 3，输出通道 16
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)  # 输入通道 16，输出通道 32
-        self.fc1 = nn.Linear(32 * 8 * 8, 128)  # 假设输入图像大小为 32x32
-        self.fc2 = nn.Linear(128, 10)  # 10 个类别
+# 设置平台兼容性
+plt = platform.system()
+if plt != 'Windows':
+    pathlib.WindowsPath = pathlib.PosixPath
 
-    def forward(self, x):
-        x = torch.relu(self.conv1(x))
-        x = torch.max_pool2d(x, kernel_size=2, stride=2)  # 16x16
-        x = torch.relu(self.conv2(x))
-        x = torch.max_pool2d(x, kernel_size=2, stride=2)  # 8x8
-        x = x.view(x.size(0), -1)  # 展平
-        x = torch.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
+# 获取 YOLOv5 根目录
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[0]  # YOLOv5 root directory
 
-def prune_channels(model, prune_ratio):
-    for name, module in model.named_modules():
-        if isinstance(module, nn.Conv2d):  # 只剪枝卷积层
-            weight = module.weight.data
-            out_channels = weight.shape[0]  # 输出通道数
-            prune_channels = int(out_channels * prune_ratio)  # 计算需要剪枝的通道数
+class MyMagnitudeImportance(tp.importance.Importance):
+    def __call__(self, group, **kwargs):
+        # 1. 首先定义一个列表用于存储分组内每一层的重要性
+        group_imp = []
+        # 2. 迭代分组内的各个层，对Conv层计算重要性
+        for dep, idxs in group: # idxs是一个包含所有可剪枝索引的列表，用于处理DenseNet中的局部耦合的情况
+            layer = dep.target.module # 获取 nn.Module
+            prune_fn = dep.handler    # 获取 剪枝函数
+            # 3. 这里我们简化问题，仅计算卷积输出通道的重要性
+            #ATTENTION：
+            if isinstance(layer, nn.Conv2d) and prune_fn == tp.prune_conv_out_channels:
+                w = layer.weight.data[idxs].flatten(1) # 用索引列表获取耦合通道对应的参数，并展开成2维
+                local_norm = w.abs().sum(1) # 计算每个通道参数子矩阵的 L1 Norm
+                group_imp.append(local_norm) # 将其保存在列表中
 
-            # 计算通道重要性（使用 L1 范数）
-            importance = weight.abs().sum(dim=(1, 2, 3))  # 计算每个通道的 L1 范数
-            sorted_idx = importance.argsort()  # 按重要性排序
-            prune_idx = sorted_idx[:prune_channels]  # 选择最不重要的通道
+        if len(group_imp)==0: return None # 跳过不包含卷积层的分组
+        # 4. 按通道计算平均重要性
+        group_imp = torch.stack(group_imp, dim=0).mean(dim=0)
+        return group_imp
 
-            # 移除不重要的通道
-            mask = torch.ones(out_channels, dtype=bool)
-            mask[prune_idx] = False  # 标记需要剪枝的通道
-            module.weight.data = module.weight.data[mask]  # 剪枝权重
-            if module.bias is not None:
-                module.bias.data = module.bias.data[mask]  # 剪枝偏置
+if __name__ == '__main__':
 
-            # 更新下一层的输入通道数
-            if isinstance(module, nn.Conv2d):
-                next_convs = []
-                for _, next_module in model.named_modules():
-                    if isinstance(next_module, nn.Conv2d) and next_module.in_channels == out_channels:
-                        next_convs.append(next_module)
-                if next_convs:
-                    for next_conv in next_convs:
-                        # 确保下一层的输入通道数与剪枝后的通道数一致
-                        if next_conv.weight.data.shape[1] == out_channels:
-                            next_conv.weight.data = next_conv.weight.data[:, mask]  # 更新下一层的输入通道
-                        else:
-                            print(f"Skipping {name}: next layer input channels do not match.")
-                else:
-                    print(f"Skipping {name}: no next conv layer found.")
 
-    return model
+    model_ckpt = torch.load(attempt_download(ROOT / "bestn.pt"))  # load
+    model_ckpt = (model_ckpt.get("ema") or model_ckpt["model"]).float()  # FP32 model
 
-def update_layer(model):
-    for name, module in model.named_modules():
-        if isinstance(module, nn.Conv2d):
-            # 获取卷积层的输出通道数
-            out_channels = module.weight.data.shape[0]
-            # 假设输入图像大小为 32x32，经过两次池化后大小为 8x8
-            fc_input_features = out_channels * 8 * 8
-            # 更新全连接层的输入特征数
-            if hasattr(model, 'fc1'):
-                model.fc1 = nn.Linear(fc_input_features, 128)
-        if isinstance(module, nn.Conv2d):  # 找到卷积层
-            out_channels = module.weight.data.shape[0]  # 剪枝后的输出通道数
-            # 找到对应的 BN 层
-            for bn_name, bn_module in model.named_modules():
-                if isinstance(bn_module, nn.BatchNorm2d) and bn_name == name.replace("conv", "bn"):
-                    # 更新 BN 层的 running_mean 和 running_var
-                    bn_module.running_mean = bn_module.running_mean[:out_channels]
-                    bn_module.running_var = bn_module.running_var[:out_channels]
-                    # 更新 BN 层的权重和偏置
-                    bn_module.weight.data = bn_module.weight.data[:out_channels]
-                    bn_module.bias.data = bn_module.bias.data[:out_channels]
+    model = Model(ROOT / "models/yolov5n.yaml")  # 使用 YOLOv5n 配置文件
+    checkpoint = torch.load(ROOT / "bestn.pt")  # 加载权重文件
+    model.load_state_dict(checkpoint["model"].state_dict())  # 加载模型权重
 
-    return model
+    example_inputs = torch.randn(1, 3,640,640)
 
-# 初始化模型
-model = SimpleCNN()
-input_tensor = torch.randn(100, 3, 32, 32)  # 假设输入图像大小为 32x32
 
-# 测试剪枝前的推理时间
-start_time = time.time()
-with torch.no_grad():
-    _ = model(input_tensor)
-end_time = time.time()
-print(f"剪枝前的推理时间: {end_time - start_time:.6f} 秒")
-model_structure(model)
-# 定义剪枝比例
-prune_ratio = 0.2  # 剪枝 20% 的通道
+    # 1. 使用我们上述定义的重要性评估
+    imp = MyMagnitudeImportance()
 
-# 执行剪枝
-pruned_model = prune_channels(model, prune_ratio)
-pruned_model = update_layer(pruned_model)
-# 测试剪枝后的推理时间
-start_time = time.time()
-with torch.no_grad():
-    _ = pruned_model(input_tensor)
-end_time = time.time()
-print(f"剪枝后的推理时间: {end_time - start_time:.6f} 秒")
-model_structure(pruned_model)
+    # 2. 忽略无需剪枝的层，例如最后的分类层
+    ignored_layers = []
+    for m in model.modules():
+        if isinstance(m, torch.nn.Conv2d) and m in model.model[-1].modules():  # 忽略检测头
+            ignored_layers.append(m)
+
+    # 3. 初始化剪枝器
+    iterative_steps = 5 # 迭代式剪枝，重复5次Pruning-Finetuning的循环完成剪枝。
+    pruner = tp.pruner.MetaPruner(
+        model,
+        example_inputs, # 用于分析依赖的伪输入
+        importance=imp, # 重要性评估指标
+        iterative_steps=iterative_steps, # 迭代剪枝，设为1则一次性完成剪枝
+        ch_sparsity=0.2, # 目标稀疏性，这里我们移除50%的通道 ResNet18 = {64, 128, 256, 512} => ResNet18_Half = {32, 64, 128, 256}
+        ignored_layers=ignored_layers, # 忽略掉最后的分类层
+    )
+
+    # 4. Pruning-Finetuning的循环
+    base_macs, base_nparams = tp.utils.count_ops_and_params(model, example_inputs)
+    for i in range(iterative_steps):
+        pruner.step() # 执行裁剪，本例子中我们每次会裁剪10%，共执行5次，最终稀疏度为50%
+        macs, nparams = tp.utils.count_ops_and_params(model, example_inputs)
+        print("  Iter %d/%d, Params: %.2f M => %.2f M" % (i+1, iterative_steps, base_nparams / 1e6, nparams / 1e6))
+        print("  Iter %d/%d, MACs: %.2f G => %.2f G"% (i+1, iterative_steps, base_macs / 1e9, macs / 1e9))
+        # finetune your model here
+        # finetune(model)
+        # ...
+    model_ckpt.model = model.model
+    ema = ModelEMA(model_ckpt)
+    ema.update_attr(model_ckpt, include=["yaml", "nc", "hyp", "names", "stride", "class_weights"])
+    ckpt = {
+        "model": deepcopy(de_parallel(model_ckpt)).half(),
+        "ema": deepcopy(ema.ema).half(),
+        "updates": ema.updates,
+    }
+    torch.save(ckpt, 'best_pruned.pt')
+    print("Model saved to: /best_pruned.pt")
+
+
